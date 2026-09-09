@@ -1,6 +1,7 @@
 import os
 import requests
-import google.generativeai as genai
+import json
+from google import genai
 
 # 環境変数の読み込み
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -24,12 +25,11 @@ def get_weather_data():
     return response.json()
 
 def analyze_with_gemini(weather_data):
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
+    client = genai.Client(api_key=GEMINI_API_KEY)
     
     prompt = f"""
     以下は名古屋市の今後3時間の15分単位の気象予報データ(Open-Meteo)です。
-    データ: {weather_data}
+    データ: {json.dumps(weather_data, ensure_ascii=False)}
 
     【指示】
     - 今後3時間以内に雨が降り始める、または急な強雨のリスクがあるか確認してください。
@@ -38,7 +38,10 @@ def analyze_with_gemini(weather_data):
     - もし雨の心配が全くない場合は、文字列『NO_RAIN』とだけ回答してください。
     """
     
-    response = model.generate_content(prompt)
+    response = client.models.generate_content(
+        model='gemini-2.5-flash',
+        contents=prompt
+    )
     return response.text.strip()
 
 def send_discord_notification(message):
