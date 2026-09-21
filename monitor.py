@@ -33,7 +33,7 @@ def analyze_with_gemini(weather_data):
 【要件】
 1. 今後3時間以内に雨が降り出す、または強まる兆候があるかを判定してください。
 2. 雨が予想される場合は、Discord用の注意喚起メッセージ（150字程度、絵文字入り）を作成してください。いつ頃傘が必要か、洗濯物の注意点を含めてください。
-3. 雨のリスクが皆無の場合は、余計な文字を含めず「NO_RAIN」とだけ返答してください。
+3. 雨のリスクが皆無、または影響が極めて軽微な場合は、余計な文字を含めず「NO_RAIN」とだけ返答してください。
 """
     response = client.models.generate_content(
         model='gemini-3.6-flash',
@@ -42,7 +42,7 @@ def analyze_with_gemini(weather_data):
     return response.text.strip()
 
 def send_discord_notification(message):
-    payload = {"content": message}
+    payload = {"content": f"🌧️ **【名古屋市 雨雲接近アラート】**\n\n{message}"}
     res = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
     res.raise_for_status()
 
@@ -52,20 +52,22 @@ def main():
         return
 
     data = get_weather_data()
-    
-    # ----------------------------------------------------
-    # テスト用強制発砲ロジック
-    # ----------------------------------------------------
-    print("【テスト実行】強制的にGemini解析とDiscord送信を行います...")
-    alert = analyze_with_gemini(data)
-    
-    if "NO_RAIN" in alert:
-        test_message = f"🧪 **【動作テスト：雨雲接近監視Bot】**\n現在、直近3時間の名古屋市内に雨の予測はありません（通常運用時はこのメッセージは送信されず静止します）。システム連携は正常です！"
-    else:
-        test_message = f"🧪 **【動作テスト：雨雲接近監視Bot】**\n\n{alert}"
+    minutely_precip = data.get("minutely_15", {}).get("precipitation", [])
+
+    # 直近3時間に 0.1mm 以上の降水予測があるかチェック（防波堤判定）
+    has_rain = any(p is not None and p > 0.1 for p in minutely_precip)
+
+    if has_rain:
+        print("降雨予測を検知しました。Geminiで解析を実行します...")
+        alert = analyze_with_gemini(data)
         
-    send_discord_notification(test_message)
-    print("Discordへテスト通知を送信しました。")
+        if "NO_RAIN" not in alert:
+            send_discord_notification(alert)
+            print("Discordへ雨雲アラートを送信しました。")
+        else:
+            print("Gemini解析結果: 降雨影響なし (NO_RAIN)")
+    else:
+        print("直近3時間の降水予測はありません。API消費をスキップして終了します。")
 
 if __name__ == "__main__":
     main()
