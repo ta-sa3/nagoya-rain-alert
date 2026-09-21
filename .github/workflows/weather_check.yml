@@ -2,23 +2,27 @@ name: Weather Monitor
 
 on:
   schedule:
-    # 15分おきに自動実行 (UTC時間)
+    # 15分おきに自動実行 (UTC基準)
     - cron: '*/15 * * * *'
-  workflow_dispatch: # 手動実行用ボタン
+  workflow_dispatch: # 手動実行用トリガー
+
+# リポジトリへの書き込み（コミット）権限を付与
+permissions:
+  contents: write
 
 jobs:
   check-weather:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: リポジトリのチェックアウト
         uses: actions/checkout@v4
 
-      - name: Pythonのセットアップ
+      - name: Python環境のセットアップ
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
-      - name: ライブラリのインストール
+      - name: 依存ライブラリのインストール
         run: |
           pip install requests google-genai
 
@@ -27,3 +31,13 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
         run: python monitor.py
+
+      - name: 通知時刻ログを自動コミットして保存
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          if [ -f last_alert.txt ]; then
+            git add last_alert.txt
+            git commit -m "chore: update last alert timestamp [skip ci]" || exit 0
+            git push
+          fi
