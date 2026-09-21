@@ -11,9 +11,12 @@ LATITUDE = 35.1815
 LONGITUDE = 136.9066
 JST = timezone(timedelta(hours=9))
 
+# クールダウン時間（時間単位）: 1度通知したら2時間は通知しない
+COOLDOWN_HOURS = 2
+ALERT_LOG_FILE = "last_alert.txt"
+
 def get_weather_data():
     url = "https://api.open-meteo.com/v1/forecast"
-    # 日本気象庁シームレスモデル(jma_seamless)と高解像度15分データを取得
     params = {
         "latitude": LATITUDE,
         "longitude": LONGITUDE,
@@ -55,6 +58,31 @@ def send_discord_notification(message):
     res = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
     res.raise_for_status()
 
+def is_in_cooldown(now_jst):
+    """前回通知から一定時間以内かどうかを判定"""
+    if not os.path.exists(ALERT_LOG_FILE):
+        return False
+    
+    try:
+        with open(ALERT_LOG_FILE, "r") as f:
+            last_alert_str = f.read().strip()
+        last_alert_time = datetime.fromisoformat(last_alert_str)
+        
+        elapsed = now_jst - last_alert_time
+        if elapsed < timedelta(hours=COOLDOWN_HOURS):
+            remaining_mins = int((timedelta(hours=COOLDOWN_HOURS) - elapsed).total_seconds() // 60)
+            print(f"クールダウン待機中: 前回の通知からまだ {int(elapsed.total_seconds() // 60)} 分しか経過していません（残り約 {remaining_mins} 分間通知を抑制）。")
+            return True
+    except Exception as e:
+        print(f"クールダウン判定エラー（リセットします）: {e}")
+        
+    return False
+
+def record_alert_time(now_jst):
+    """通知した時刻をファイルに記録"""
+    with open(ALERT_LOG_FILE, "w") as f:
+        f.write(now_jst.isoformat())
+
 def main():
     if not GEMINI_API_KEY or not DISCORD_WEBHOOK_URL:
         print("エラー: 必要な環境変数が未設定です。")
@@ -69,18 +97,15 @@ def main():
         print("気象データが取得できませんでした。")
         return
 
-    # 現在時刻 (JST) を作成
     now_jst = datetime.now(JST)
     current_time_str = now_jst.strftime("%Y-%m-%dT%H:%M")
 
-    # 現在時刻以降のインデックスを探す
     start_idx = 0
     for idx, t in enumerate(raw_times):
         if t >= current_time_str:
             start_idx = idx
             break
 
-    # 直近3時間分（15分刻みで12個分）を正しく切り出し
     end_idx = start_idx + 12
     upcoming_times = [t.split("T")[1] for t in raw_times[start_idx:end_idx]]
     upcoming_precip = precip_list[start_idx:end_idx]
@@ -89,14 +114,21 @@ def main():
     print(f"監視対象時刻: {upcoming_times}")
     print(f"予想降水量推移: {upcoming_precip}")
 
-    # 直近3時間で0.1mm以上の雨があるか判定
     has_rain = any(p is not None and p >= 0.1 for p in upcoming_precip)
 
     if has_rain:
-        print("直近3時間以内の降雨を検知！Geminiで解析します...")
+        print("直近3時間以内の降雨を検知しました。")
+        
+        # クールダウン中かどうかチェック
+        if is_in_cooldown(now_jst):
+            print("通知はスキップします（クールダウン中）。")
+            return
+
+        print("Geminiで解析を実行します...")
         alert = analyze_with_gemini(upcoming_precip, upcoming_times)
         send_discord_notification(alert)
-        print("Discordへ通知を送信しました。")
+        record_alert_time(now_jst)
+        print("Discordへ通知を送信し、送信時刻を記録しました。")
     else:
         print("直近3時間に降水予測はありません。待機します。")
 
