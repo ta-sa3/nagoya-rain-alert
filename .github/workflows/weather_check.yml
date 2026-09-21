@@ -1,4 +1,38 @@
-- name: 通知時刻ログを自動コミットして保存
+name: Weather Monitor
+
+on:
+  schedule:
+    # 15分おきに自動実行 (UTC基準: */15 * * * *)
+    - cron: '*/15 * * * *'
+  workflow_dispatch: # Actions画面からの手動実行用トリガー
+
+# リポジトリへログファイル(last_alert.json)を自動コミット・プッシュするための権限付与
+permissions:
+  contents: write
+
+jobs:
+  check-weather:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: リポジトリのチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Python環境のセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 依存ライブラリのインストール
+        run: |
+          pip install requests google-genai
+
+      - name: 監視スクリプト実行
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: python monitor.py
+
+      - name: 通知ログを自動コミットして保存
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
